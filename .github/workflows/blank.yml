@@ -1,0 +1,160 @@
+package com.example.secureencryption;
+
+// Replace Android imports with standard Java imports
+import java.util.Base64;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.InvalidKeyException;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.security.SecureRandom;
+import java.security.UnrecoverableEntryException;
+import java.security.cert.CertificateException;
+
+import javax.crypto.BadPaddingException;
+import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.KeyGenerator;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+
+/**
+ * SecureEncryptionManager - A utility class for strong encryption
+ * Using AES-256 in GCM mode with Java KeyStore for secure key management
+ */
+public class SecureEncryptionManager {
+    private static final String TRANSFORMATION = "AES/GCM/NoPadding";
+    private static final String KEY_ALGORITHM_AES = "AES";
+    private static final String JAVA_KEYSTORE = "PKCS12"; // Standard Java KeyStore type
+    private static final int GCM_IV_LENGTH = 12; // 12 bytes for GCM recommended
+    private static final int GCM_TAG_LENGTH = 128; // GCM authentication tag length in bits
+    private static final String KEY_ALIAS = "SecureEncryptionKey";
+    private static final int KEY_SIZE = 256; // AES-256 for maximum security
+    
+    // Define constants to replace KeyProperties
+    private static final int PURPOSE_ENCRYPT = 1;
+    private static final int PURPOSE_DECRYPT = 2;
+    private static final String BLOCK_MODE_GCM = "GCM";
+    private static final String ENCRYPTION_PADDING_NONE = "NoPadding";
+
+    private KeyStore keyStore;
+    private String keyStorePassword = "keystore_password"; // You should use a secure password
+
+    public SecureEncryptionManager() throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException {
+        initKeyStore();
+    }
+
+    private void initKeyStore() throws KeyStoreException, CertificateException, NoSuchAlgorithmException, IOException {
+        keyStore = KeyStore.getInstance(JAVA_KEYSTORE);
+        
+        // For an existing keystore file, you would load it like this:
+        // keyStore.load(new FileInputStream("keystore.p12"), keyStorePassword.toCharArray());
+        
+        // For a new keystore:
+        keyStore.load(null, keyStorePassword.toCharArray());
+        
+        // In a real application, you would save the keystore:
+        // keyStore.store(new FileOutputStream("keystore.p12"), keyStorePassword.toCharArray());
+    }
+
+    /**
+     * Create or retrieve the encryption key
+     */
+    public SecretKey getOrCreateSecretKey() throws NoSuchAlgorithmException, NoSuchProviderException,
+            InvalidAlgorithmParameterException, KeyStoreException, UnrecoverableEntryException {
+
+        // Check if key already exists
+        if (keyStore.containsAlias(KEY_ALIAS)) {
+            KeyStore.SecretKeyEntry secretKeyEntry = (KeyStore.SecretKeyEntry) keyStore.getEntry(
+                    KEY_ALIAS, new KeyStore.PasswordProtection(keyStorePassword.toCharArray()));
+            return secretKeyEntry.getSecretKey();
+        } else {
+            // Create new key if it doesn't exist
+            KeyGenerator keyGenerator = KeyGenerator.getInstance(KEY_ALGORITHM_AES);
+            keyGenerator.init(KEY_SIZE);
+            SecretKey secretKey = keyGenerator.generateKey();
+            
+            // Store the key in the keystore
+            KeyStore.SecretKeyEntry secretKeyEntry = new KeyStore.SecretKeyEntry(secretKey);
+            keyStore.setEntry(KEY_ALIAS, secretKeyEntry, 
+                    new KeyStore.PasswordProtection(keyStorePassword.toCharArray()));
+            
+            // In a real application, you would save the updated keystore:
+            // keyStore.store(new FileOutputStream("keystore.p12"), keyStorePassword.toCharArray());
+            
+            return secretKey;
+        }
+    }
+
+    /**
+     * Encrypt data using AES-256 in GCM mode
+     *
+     * @param plaintext The text to encrypt
+     * @return Base64 encoded encrypted data with IV prepended
+     */
+    public String encrypt(String plaintext) throws NoSuchPaddingException, NoSuchAlgorithmException,
+            InvalidKeyException, InvalidAlgorithmParameterException, BadPaddingException,
+            IllegalBlockSizeException, NoSuchProviderException, UnrecoverableEntryException, KeyStoreException {
+
+        SecretKey secretKey = getOrCreateSecretKey();
+
+        // Generate a random IV (Initialization Vector)
+        byte[] iv = new byte[GCM_IV_LENGTH];
+        SecureRandom secureRandom = new SecureRandom();
+        secureRandom.nextBytes(iv);
+
+        // Initialize cipher for encryption
+        Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+        GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey, spec);
+
+        // Encrypt the data
+        byte[] encryptedBytes = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
+
+        // Combine IV and encrypted data and encode as Base64
+        byte[] combined = new byte[iv.length + encryptedBytes.length];
+        System.arraycopy(iv, 0, combined, 0, iv.length);
+        System.arraycopy(encryptedBytes, 0, combined, iv.length, encryptedBytes.length);
+
+        // Replace Android Base64 with Java's standard Base64
+        return Base64.getEncoder().encodeToString(combined);
+    }
+
+    /**
+     * Decrypt data that was encrypted using the encrypt method
+     *
+     * @param encryptedData Base64 encoded encrypted data with IV prepended
+     * @return The decrypted plaintext
+     */
+    public String decrypt(String encryptedData) throws NoSuchPaddingException, NoSuchAlgorithmException,
+            InvalidKeyException, InvalidAlgorithmParameterException, BadPaddingException,
+            IllegalBlockSizeException, NoSuchProviderException, UnrecoverableEntryException, KeyStoreException {
+
+        // Get the key from KeyStore
+        SecretKey secretKey = getOrCreateSecretKey();
+
+        // Decode the Base64 data using Java's standard Base64
+        byte[] combined = Base64.getDecoder().decode(encryptedData);
+
+        // Extract IV and encrypted data
+        byte[] iv = new byte[GCM_IV_LENGTH];
+        byte[] encryptedBytes = new byte[combined.length - GCM_IV_LENGTH];
+        System.arraycopy(combined, 0, iv, 0, iv.length);
+        System.arraycopy(combined, iv.length, encryptedBytes, 0, encryptedBytes.length);
+
+        // Initialize cipher for decryption
+        Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+        GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
+        cipher.init(Cipher.DECRYPT_MODE, secretKey, spec);
+
+        // Decrypt the data
+        byte[] decryptedBytes = cipher.doFinal(encryptedBytes);
+        return new String(decryptedBytes, StandardCharsets.UTF_8);
+    }
+}
